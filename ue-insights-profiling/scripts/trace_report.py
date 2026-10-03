@@ -6,13 +6,14 @@
   python trace_report.py cost     --trace X.utrace [--from S --to S]   # where the frame goes, ms/frame per thread
   python trace_report.py hitches  --trace X.utrace [--threshold 40 --top 10]
   python trace_report.py compare  --trace NEW.utrace --baseline OLD.utrace [--prefix MP/]
+  python trace_report.py locate   --trace X.utrace [--timers NAME ...]   # which project files are behind the costs
 
 Common: --out DIR (default <project>/Saved/Profiling/analysis), --insights EXE, --prefix PFX.
 Times in Insights CSVs are seconds; everything printed here is milliseconds.
 Only uses `TimingInsights.ExportTimingEvents` / `ExportThreads` (ExportTimerStatistics ignores
 the -threads filter in UE 5.7, so it is never used for per-thread numbers).
 """
-import argparse, bisect, collections, csv, os, subprocess, sys
+import argparse, bisect, collections, csv, os, re, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ue_env  # noqa: E402
@@ -270,19 +271,112 @@ def mode_compare(ins, a):
         print(f'  {d:+7.3f}  [{g}] {n[:80]}  ({mb.get((g,n),0):.3f} -> {mn.get((g,n),0):.3f})')
 
 
+ENGINE_ONLY = ('WinPumpMessages', 'WaitForTasks', 'Slate::Prepass', 'Slate_PaintSlowPath', 'ProcessLocalPlayerSlateOperations',
+               'FEngineLoop', 'RHI', 'D3D12', 'SceneRender', 'TemporalSuperResolution', 'Nanite', 'VirtualShadowMap', 'Shadow',
+               'RenderGraph', 'FRDG', 'ZenHttp', 'CharacterMesh', 'UWorld_Tick', 'Tick_Engine', 'Frame', 'Present')
+
+
+class SourceIndex:
+    """Reads the project's C++ sources once and answers 'which file is behind this timer?'."""
+
+    def __init__(self, env):
+        self.files = {}
+        for m in env.get('modules', []):
+            for root, _, fs in os.walk(m['source_dir']):
+                for f in fs:
+                    if f.endswith(('.cpp', '.h', '.inl')):
+                        p = os.path.join(root, f)
+                        try:
+                            self.files[p] = open(p, encoding='utf-8', errors='replace').read().splitlines()
+                        except OSError:
+                            pass
+        self.root = env.get('project_root', '.')
+
+    def grep(self, pattern, limit=6):
+        rx, out = re.compile(pattern), []
+        for p, lines in self.files.items():
+            for i, line in enumerate(lines, 1):
+                if rx.search(line) and not line.lstrip().startswith('//'):
+                    out.append((os.path.relpath(p, self.root), i, line.strip()[:100]))
+                    if len(out) >= limit:
+                        return out
+        return out
+
+    def locate(self, name, prefix):
+        """Return (kind, [(file, line, text)]) for a timer name."""
+        if prefix and name.startswith(prefix):
+            rest = name[len(prefix):]
+            return 'project scope', self.grep(r'_SCOPE\w*\(\s*"' + re.escape(rest) + r'"')
+        if name == 'Tick_Core':
+            return 'core ticker: FTSTicker delegates registered by the project', self.grep(r'GetCoreTicker\(\)\.AddTicker|AddTicker\(')
+        if name.startswith(('WBP_', 'SConstraintCanvas', 'SViewport', 'Paint: Game UI', 'Slate', 'SInvalidation', 'FViewport_Draw',
+                            'ProcessLocalPlayerSlate')) or 'Widget' in name:
+            hits = self.grep(r'::(NativePaint|OnPaint|NativeTick|NativeConstruct)\s*\(', 8)
+            return ('UI pipeline (engine). Project widgets that paint/tick are the likely contributors; '
+                    'WBP_* assets are Blueprint widgets under Content/'), hits
+        if re.fullmatch(r'\w+::\w+', name):
+            cls, fn = name.split('::')
+            hits = self.grep(re.escape(cls.lstrip('AU')) + r'\w*::' + re.escape(fn) + r'\s*\(') or self.grep(re.escape(name) + r'\s*\(')
+            return ('project function' if hits else 'engine function'), hits
+        if any(name.startswith(e) for e in ENGINE_ONLY) or ' ' in name or '%' in name:
+            return 'engine/OS timer (no project source)', []
+        if re.fullmatch(r'\w+', name):
+            hits = [(os.path.relpath(p, self.root), 1, 'file name match') for p in self.files if name.lower() in os.path.basename(p).lower()]
+            hits += self.grep(r'\bclass\b[^;{]*\b[UAF]?' + re.escape(name) + r'\w*\b', 4)
+            return ('component/actor tick (class name in the trace)' if hits else 'engine or Blueprint (no project match)'), hits[:6]
+        return 'unknown', []
+
+
+def mode_locate(ins, a):
+    env = ue_env.discover(a.project)
+    if 'error' in env or not env.get('modules'):
+        print('PROJECT_NOT_CONNECTED: no .uproject / Source folder was found from', os.path.abspath(a.project))
+        print('Ask the user to connect or attach the Unreal project folder (at least Source/, ideally the whole project)')
+        print('and run again with --project <path to the folder that contains the .uproject>.')
+        return
+    names = list(a.timers or [])
+    if not names:
+        fr = load_frames(ins)
+        run = foreground_runs(fr)[0]
+        t0, t1 = run[0][0], run[-1][0] + run[-1][2] / 1000
+        ex = exclusive(load_window(ins, t0, t1, f'{t0:.0f}_{t1:.0f}'))
+        gt = sorted(((n, v) for (g, n), v in ex.items() if g == 'GameThread' and not is_noise(n)), key=lambda kv: -kv[1][0])
+        mine = sorted(((n, v) for (g, n), v in ex.items() if a.prefix and n.startswith(a.prefix)), key=lambda kv: -kv[1][2])
+        names = [n for n, _ in gt[:a.top]] + [n for n, _ in mine[:a.top]]
+        for st, act, tot, idle in sorted([f for f in fr if f[1] >= a.threshold], key=lambda f: -f[1])[:5]:
+            hex_ = exclusive(load_window(ins, st, st + tot / 1000, f'h{st:.3f}'))
+            top = sorted(((n, v) for (g, n), v in hex_.items() if g == 'GameThread' and not is_noise(n)), key=lambda kv: -kv[1][0])
+            if top: names.append(top[0][0])
+        names = list(dict.fromkeys(names))
+    idx = SourceIndex(env)
+    print(f'source files indexed: {len(idx.files)}  (project: {env["project_root"]})')
+    print('Timer -> where it comes from. Files are CANDIDATES: read them before proposing a fix.\n')
+    for n in names:
+        kind, hits = idx.locate(n, a.prefix)
+        print(f'* {n}\n    kind: {kind}')
+        for f, ln, txt in hits:
+            print(f'    {f}:{ln}  {txt}')
+        if not hits and kind.startswith(('project', 'component', 'UI', 'core')):
+            print('    (no match found; search the code by hand)')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('mode', choices=['overview', 'scopes', 'cost', 'hitches', 'compare'])
+    ap.add_argument('mode', choices=['overview', 'scopes', 'cost', 'hitches', 'compare', 'locate'])
     ap.add_argument('--trace'); ap.add_argument('--baseline'); ap.add_argument('--out'); ap.add_argument('--insights')
     ap.add_argument('--project', default='.'); ap.add_argument('--prefix', default='')
     ap.add_argument('--from', dest='t_from', type=float); ap.add_argument('--to', dest='t_to', type=float)
     ap.add_argument('--threshold', type=float, default=40.0); ap.add_argument('--top', type=int, default=12)
+    ap.add_argument('--timers', nargs='*', help='locate: timer names to map to source files (default: the top costs and hitch causes)')
     a = ap.parse_args()
     env = ue_env.discover(a.project)
     exe = a.insights or env.get('unreal_insights')
     trace = a.trace or (env.get('recent_traces') or [None])[0]
-    if not trace: sys.exit('no --trace given and no recent .utrace found')
+    if not trace and not (a.mode == 'locate' and ('error' in env or not env.get('modules'))):
+        sys.exit('no --trace given and no recent .utrace found')
     out = a.out or os.path.join(env.get('project_root', '.'), 'Saved', 'Profiling', 'analysis')
+    if a.mode == 'locate' and ('error' in env or not env.get('modules')):
+        return mode_locate(None, a)          # prints PROJECT_NOT_CONNECTED and what to ask the user
     ins = Insights(trace, out, exe)
     if not a.prefix: a.prefix = env.get('profiling_prefix') or ''   # project scope prefix, e.g. "MP/"
     if a.mode == 'scopes' and not a.prefix: sys.exit('scopes mode needs --prefix (no profiling header found)')

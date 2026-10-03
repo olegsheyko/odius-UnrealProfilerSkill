@@ -44,7 +44,19 @@ same-line collisions, scopes in headers, variables declared inside scope blocks.
 output of audit_scopes.py: [paste]
 ```
 
-## 5. How do I record the trace?
+## 5. Suggest fixes for what the trace found
+
+```
+Follow the attached SKILL.md (Job B, step 5) and docs/optimization.md.
+Here is the analysis report and the output of `trace_report.py locate`: [paste both]
+Here are the source files behind the biggest costs: [paste files, or attach the project folder].
+Suggest fixes only for the problems in the report, in the format from optimization.md
+(problem with number, file and line, why it is slow, fix, estimated gain, risk, how to check).
+Rank them by value. Do not change any code until I choose.
+If I did not give you the source files, ask me for them first and name the files you need.
+```
+
+## 6. How do I record the trace?
 
 ```
 Using docs/capture.md, give me the exact command to record a trace of [map / scenario] for this project in

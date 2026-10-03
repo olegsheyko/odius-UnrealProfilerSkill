@@ -1,6 +1,6 @@
 ---
 name: ue-insights-profiling
-description: Unreal Insights profiling for Unreal Engine C++ projects - add trace marks (scopes) to mechanics and analyze .utrace files without the Insights UI. Use for any request about profiling, Unreal Insights, trace files, hitches, stutter, frame time, what costs FPS, or adding measurements to a mechanic. Also use for Russian requests - профилирование, профилировщик, трассировка, трейс, разметь механику, добавь замеры, ФПС, просадки, хитч, фриз, что тратит кадр, почему тормозит.
+description: Unreal Insights profiling for Unreal Engine C++ projects - add trace marks (scopes) to mechanics, analyze .utrace files without the Insights UI, find the source files behind the costs and suggest fixes. Use for any request about profiling, Unreal Insights, trace files, hitches, stutter, frame time, what costs FPS, optimizing performance, or adding measurements to a mechanic. Also use for Russian requests - профилирование, профилировщик, трассировка, трейс, разметь механику, добавь замеры, ФПС, просадки, хитч, фриз, что тратит кадр, почему тормозит.
 ---
 
 # Unreal Insights profiling
@@ -73,6 +73,23 @@ Input: a `.utrace` path, or "analyze the latest trace" (use `recent_traces[0]` f
 4. **Write the report:** a short conclusion; a table of the biggest costs in ms per frame; a split into ours, UI,
    engine, editor and GPU; warnings (PIE or Standalone, window length); and what to measure next. Take numbers only
    from the script output. Call everything else a hypothesis and say how to test it. Do not change code unless asked.
+5. **Connect the report to the code (always do this after the report).** Check whether you can read the project's
+   source: step 0 found a `.uproject` and a `Source` folder, or you can open the files the user attached.
+   - **Project connected:**
+     1. Run `python <skill>/scripts/trace_report.py locate --trace <file>`. It maps the biggest costs and the hitch
+        causes to source files and lines. To check one cost, add `--timers NAME [NAME ...]`.
+     2. Open the candidate files and read the whole functions (and their callers).
+     3. **Read `<skill>/docs/optimization.md`.** Write suggestions only for the problems the analysis found, in the
+        format of that file: problem with its number, file and line, why it is slow, the fix, the estimated gain, the risk,
+        and how to check it. Rank them by value. Say clearly which costs belong to the engine or the editor and have no project fix.
+     4. Do not edit code. End by asking which suggestions the user wants you to apply.
+   - **Project NOT connected** (the script prints `PROJECT_NOT_CONNECTED`, or you cannot read any project files):
+     stop after the report and ask the user, in the same message, using words like these:
+     "To suggest fixes I need to read the code. Please connect or attach the Unreal project folder (at least `Source/`,
+     and `Config/` if possible), then tell me and I will continue." If the chat cannot connect folders, ask the user
+     to paste the files behind the biggest costs, and name them if you can (for example the class names in the trace,
+     such as `NetworkGrabSync` means `NetworkGrabSyncComponent.cpp`).
+6. **After the user applies a fix:** ask for a new trace of the same scenario and run `compare` (see `optimization.md`).
 
 Do not use `ExportTimerStatistics` for numbers per thread. In UE 5.7 it ignores `-threads`. The scripts use `ExportTimingEvents`.
 

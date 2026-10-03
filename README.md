@@ -40,7 +40,15 @@ This repository holds one skill: [`ue-insights-profiling/`](ue-insights-profilin
 - Compares two traces (before and after your change).
 - Works from the command line. You do not need to open the Unreal Insights window.
 
-**3. Help you record a trace**
+**3. Find the code behind the numbers and suggest fixes**
+- After the analysis, the assistant finds the source files and lines behind the biggest costs and the hitches.
+- It reads that code and suggests fixes **only for the problems the trace found**. Each suggestion has the number,
+  the file and line, the reason, the fix, the estimated gain, the risk, and how to check it.
+- It does not change your code until you choose what to apply.
+- If the assistant cannot see your project, it asks you to connect the project folder (or to paste the files).
+- After you apply a fix, record the same scenario again and it compares the two traces.
+
+**4. Help you record a trace**
 - Gives you the right command and the steps for a clean recording.
 
 [Back to top](#ue-insights-profiling-skill)
@@ -85,6 +93,7 @@ Just ask in your own words. You do not need to type the skill name. For example:
 - "Look at the latest trace. What costs FPS?"
 - "Why do I get stutters in this trace?"
 - "Compare these two traces. Did my change help?"
+- "Analyze the trace and suggest how to fix the problems you found."
 - "How do I record a trace?"
 
 Russian works too, for example "разметь Fermenter для профилировщика" or "глянь последний трейс, что жрёт фпс".
@@ -95,6 +104,8 @@ Russian works too, for example "разметь Fermenter для профилир
 2. [Record a trace](#record-and-open-a-trace) while you play the mechanic for about 30 seconds.
 3. Ask the assistant to analyze the trace.
 4. Read the report. It tells you the biggest costs and what to check next.
+5. Let the assistant read your project folder (connect it to the chat or the agent). It then points to the code
+   behind the costs and suggests fixes. Choose which ones to apply, record again, and compare.
 
 [Back to top](#ue-insights-profiling-skill)
 
@@ -203,6 +214,7 @@ python <skill>/scripts/trace_report.py hitches  --trace Saved/Profiling/my.utrac
 | `trace_report.py scopes` | What your own marks cost |
 | `trace_report.py hitches` | The slowest frames and their causes |
 | `trace_report.py compare` | Two traces side by side |
+| `trace_report.py locate` | The project source files and lines behind the biggest costs |
 
 **Chat assistant without file access?** Open [`PROMPTS.md`](ue-insights-profiling/PROMPTS.md), paste a prompt, and attach
 `SKILL.md` and the docs file it names. Then paste the script output the assistant asks for.

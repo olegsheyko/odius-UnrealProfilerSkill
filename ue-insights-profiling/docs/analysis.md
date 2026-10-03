@@ -37,6 +37,7 @@
 | `scopes` | "What do our mechanics cost?" | For each scope: total, ms per frame, calls, average, max over the whole trace |
 | `hitches` | Stutters | For each hitch: the main timer, a label for the cause, your share |
 | `compare` | Before and after a change | The biggest changes in ms per frame, by timer |
+| `locate` | After the analysis, to find the code | Maps the biggest costs and hitch causes to project source files and lines. If the project is not connected it prints `PROJECT_NOT_CONNECTED`. |
 
 ## How to draw conclusions
 
@@ -82,6 +83,8 @@ cost) from PIE are mostly fine.
 3. Hitches: how many real ones, by type, which are ours.
 4. Warnings: the source (PIE or Standalone), the window length, the number of frames, hypotheses.
 5. Next steps: what to measure, where to add scopes, what to record. Change code only if asked.
+6. Code and fixes: use `locate` to find the files behind the costs and write fix suggestions as described in
+   `optimization.md`. If the project folder is not connected, ask the user to connect it.
 
 ## Manual exports (for a custom view)
 
