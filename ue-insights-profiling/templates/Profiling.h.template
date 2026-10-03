@@ -1,0 +1,29 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "ProfilingDebugging/CountersTrace.h"
+#include "ProfilingDebugging/MiscTrace.h"
+
+// Unreal Insights helpers for __PROJECT__ mechanics.
+//
+// Naming convention for scopes: "__PREFIX__/<Mechanic>/<Function>[/<Phase>]", e.g.
+//   __PFX___SCOPE("Fermenter/Tick");
+//   __PFX___SCOPE("Cauldron/Tick/Brewing");
+// In Insights the common "__PREFIX__/" prefix lets you filter the Timers panel with "__PREFIX__/".
+//
+// All macros compile to nothing in Shipping (and whenever UE_TRACE_ENABLED is 0),
+// so they are safe to leave in production code.
+
+// Scoped CPU timing event. Name MUST be a string literal (static, near-zero cost
+// when the trace channel is off). Do not put two on the same source line.
+#define __PFX___SCOPE(Name) TRACE_CPUPROFILER_EVENT_SCOPE_STR("__PREFIX__/" Name)
+
+// Scoped CPU timing event with a runtime-built name (FString/FName/TCHAR*).
+// More expensive than __PFX___SCOPE: use only where the name carries real information
+// (e.g. which recipe or potion type), never in per-frame hot loops.
+#define __PFX___SCOPE_DYNAMIC(Text) TRACE_CPUPROFILER_EVENT_SCOPE_TEXT(Text)
+
+// Bookmark: a vertical marker on the Insights timeline for one-off gameplay events.
+// Format must be a TEXT() literal.
+#define __PFX___BOOKMARK(Format, ...) TRACE_BOOKMARK(TEXT("__PREFIX__ ") Format, ##__VA_ARGS__)
