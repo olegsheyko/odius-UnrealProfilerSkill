@@ -1,11 +1,11 @@
 # UE Insights Profiling Skill
 
 <p align="center">
-  <video src="https://github.com/olegsheyko/odius-UnrealProfilerSkill/raw/main/assets/ue-insights-profiling-promo.mp4" controls muted width="100%"></video>
+  <a href="assets/ue-insights-profiling-promo.mp4"><img src="assets/ue-insights-profiling-promo.gif" alt="Trailer: UE Insights Profiling Skill" width="100%"></a>
 </p>
 
 <p align="center">
-  <a href="assets/ue-insights-profiling-promo.mp4">&#9654; Watch the trailer</a> (use this link if the player above does not load)
+  &#9654; <a href="assets/ue-insights-profiling-promo.mp4">Watch the full trailer (with sound)</a>
 </p>
 
 Find out what makes your Unreal Engine game slow, without learning the Unreal Insights window first.
@@ -21,14 +21,15 @@ This repository holds one skill: [`ue-insights-profiling/`](ue-insights-profilin
 2. [What do I need?](#what-do-i-need)
 3. [Install (once per developer)](#install-once-per-developer)
 4. [How to use it](#how-to-use-it)
-5. [Record and open a trace](#record-and-open-a-trace)
-6. [Check that your marks are in the trace](#check-that-your-marks-are-in-the-trace)
-7. [Find the source file of a mark](#find-the-source-file-of-a-mark)
-8. [What you see in the Insights window](#what-you-see-in-the-insights-window)
-9. [Use it without an AI](#use-it-without-an-ai)
-10. [Good to know](#good-to-know)
-11. [What is inside](#what-is-inside)
-12. [Troubleshooting](#troubleshooting)
+5. [Blueprint support](#blueprint-support)
+6. [Record and open a trace](#record-and-open-a-trace)
+7. [Check that your marks are in the trace](#check-that-your-marks-are-in-the-trace)
+8. [Find the source file of a mark](#find-the-source-file-of-a-mark)
+9. [What you see in the Insights window](#what-you-see-in-the-insights-window)
+10. [Use it without an AI](#use-it-without-an-ai)
+11. [Good to know](#good-to-know)
+12. [What is inside](#what-is-inside)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -125,6 +126,62 @@ Russian works too, for example "разметь Fermenter для профилир
 4. Read the report. It tells you the biggest costs and what to check next.
 5. Let the assistant read your project folder (connect it to the chat or the agent). It then points to the code
    behind the costs and suggests fixes. Choose which ones to apply, record again, and compare.
+
+[Back to top](#ue-insights-profiling-skill)
+
+---
+
+## Blueprint support
+
+Many teams build AI, State Tree, widgets and gameplay in Blueprint, not in C++. The skill supports them in two ways.
+
+**1. Blueprint functions show up in the trace by themselves.**
+In the editor, every Blueprint function, event, widget, animation Blueprint and State Tree task that runs is written to the
+trace with its name (for example `BP_Cauldron_C`, `STT_SetGuestState`, `ExecuteUbergraph_BPC_GuestOrder`). The assistant reads
+them with `trace_report.py blueprint`. You do not change any Blueprint. (In builds without developer tools, also tick
+**Stat Named Events** in the Trace menu.)
+
+**2. Mark a part INSIDE a Blueprint function with profiling nodes.**
+An Event Graph is one block in the trace. To see which part of it is slow, put these nodes around it (category **Profiling**):
+
+| Node | Use it for |
+|---|---|
+| **Begin / End Profile Scope** | A short timed part, finished in the same frame. Shows in Timers as `MP/BP/<Name>`. |
+| **Begin / End Profile Region** | Work that lasts several frames (Delay, latent State Tree tasks). |
+| **Profile Bookmark** | A one-time event, shown as a line on the timeline. |
+
+How it works: put **Begin Profile Scope** before the nodes you want to measure, and **End Profile Scope** after them. Connect
+the **Handle** from Begin to End. Call End on **every** path out of the marked part. The nodes are Development only, so they
+are removed from Shipping builds.
+
+![Event Tick with a Begin Profile Scope before a loop and an End Profile Scope on the Completed pin](assets/blueprint_scope_graph.png)
+
+*One scope around a loop. Begin is before the loop, End is on the loop's Completed pin.*
+
+Scopes can be nested. End the inner one first. Here `BadLoop` covers the whole part, and `BadForLoop` covers only the loop,
+so you can see how much the `Get All Actors Of Class` call costs.
+
+![Two nested Profile Scopes: BadLoop around Get All Actors and the loop, BadForLoop around the loop](assets/blueprint_nested_scopes_graph.png)
+
+*Two nested scopes. The inner scope (BadForLoop) ends first.*
+
+In Unreal Insights the scopes appear as normal timers, nested exactly as in the graph:
+
+![Insights timeline: BadLoop contains GetAllActorsOfClass and BadForLoop](assets/blueprint_scope_timeline.png)
+
+*In the timeline: `MP/BP/BadLoop` contains `GetAllActorsOfClass` and `MP/BP/BadForLoop`. The long `BeginProfileScope` bar is the engine's own wrapper around the node call and can be ignored.*
+
+![Insights Timers panel filtered by MP/BP with the BadLoop scope and its timeline](assets/blueprint_insights_result.webp)
+
+*Search `MP/BP` in the Timers panel to list your Blueprint marks with Count, Incl and Excl.*
+
+Rules in short:
+1. Every Begin needs an End on every path. A forgotten End is closed at the end of the frame and a warning is written to the Output Log.
+2. Use a **Region**, not a Scope, if the part waits (Delay, latent nodes).
+3. Put one Scope around a loop, not inside it.
+
+The node library is added once to the project by a C++ developer (the assistant can do it from a template). Details, rules
+and troubleshooting: [`docs/blueprint.md`](ue-insights-profiling/docs/blueprint.md).
 
 [Back to top](#ue-insights-profiling-skill)
 

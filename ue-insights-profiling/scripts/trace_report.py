@@ -64,12 +64,15 @@ class Insights:
         if not os.path.exists(self.exe):
             sys.exit(f'UnrealInsights.exe not found: {self.exe}')
         import re
-        self.tag = re.sub(r'[^A-Za-z0-9_.-]', '_', os.path.splitext(os.path.basename(self.trace))[0])
+        # The cache key includes the trace file's size and modification time, so a new recording that reuses the same
+        # file name never gets results exported from an older one.
+        st = os.stat(self.trace)
+        self.tag = re.sub(r'[^A-Za-z0-9_.-]', '_', os.path.splitext(os.path.basename(self.trace))[0]) + f'_{st.st_size:x}_{int(st.st_mtime):x}'
 
     def export(self, name, command_tail, cmd='ExportTimingEvents'):
         """Run an export (cached by file name). Returns the CSV path."""
         path = os.path.join(self.out, f'{self.tag}__{name}.csv')
-        if os.path.exists(path) and os.path.getsize(path) > 0:
+        if os.path.exists(path) and os.path.getsize(path) > 0:   # a header-only CSV is a valid "no events" result
             return path
         # NB: one raw command-line string so inner quotes reach UE untouched.
         qpath = path   # Insights' parser breaks on spaces: safe_dir() guarantees a plain path
