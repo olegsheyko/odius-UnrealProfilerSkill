@@ -9,7 +9,8 @@ This file is a full set of instructions. It works with any AI assistant or agent
 Paths below are relative to THIS skill folder (the folder that contains this file). Call it `<skill>`.
 Run every command with the Unreal project root as the working directory, or add `--project <path to the project>`.
 
-There are two jobs: **INSTRUMENT** (add profiling marks to code) and **ANALYZE** (read a `.utrace` file).
+There are two main jobs: **INSTRUMENT** (add profiling marks to code) and **ANALYZE** (read a `.utrace` file).
+Two more: **C** (help record a trace) and **D** (Blueprint profiling nodes).
 Never change how the game behaves. Marks only add measurements.
 
 ## How to run commands
@@ -69,6 +70,10 @@ Input: a `.utrace` path, or "analyze the latest trace" (use `recent_traces[0]` f
    - What our mechanics cost: `scopes` (the prefix is found automatically, or use `--prefix X/`).
    - Stutters and freezes: `hitches --threshold 40 --top 10`.
    - Before and after a change: `compare --trace NEW --baseline OLD`.
+   - Blueprint, State Tree and Behavior Tree costs: `blueprint` (add `--from S --to S` to look inside one hitch).
+     In the editor it works whenever the `cpu` channel is on; in other builds it needs **Stat Named Events**. If it finds nothing, tell the user to record again with that
+     option (see `<skill>/docs/capture.md`). Blueprint graphs cannot be searched like text: name the Blueprint asset and the
+     function from the trace and ask the user to open it, or use the project's editor tools if you have them.
 3. **Read `<skill>/docs/analysis.md`** to understand the results: work versus waiting, engine timers, editor (PIE) warnings, report format.
 4. **Write the report:** a short conclusion; a table of the biggest costs in ms per frame; a split into ours, UI,
    engine, editor and GPU; warnings (PIE or Standalone, window length); and what to measure next. Take numbers only
@@ -98,9 +103,32 @@ Do not use `ExportTimerStatistics` for numbers per thread. In UE 5.7 it ignores 
 Give the commands from `<skill>/docs/capture.md`. For honest numbers: use Standalone or `-game`, the Development
 configuration, no debugger, and keep the game window in focus.
 
+## Job D: Blueprint profiling nodes (marks INSIDE Blueprint functions)
+
+Input: the user works in Blueprint (AI, State Tree, widgets...) and wants to measure a part of a Blueprint function, or asks
+for Blueprint profiling nodes.
+
+1. **Check that the node library exists.** Search the project source for `BeginProfileScope`. If it exists, reuse it.
+2. **If it is missing, add it (C++ change, ask first):** create the two files from `<skill>/templates/ProfilingBlueprintLibrary.h.template`
+   and `ProfilingBlueprintLibrary.cpp.template` in the main game module. Replace `__MODULE_API__` (for example `MYGAME_API`),
+   `__PFX__` (the short prefix, for example `MP`) and `__PREFIX__` (the trace prefix, the same as the C++ macro prefix).
+   Name the files `<PFX>ProfilingBlueprintLibrary.h/.cpp`. Follow the version control rules. Build the editor target with
+   the editor closed, as in Job A. No `Build.cs` change is needed.
+3. **Teach the user.** Point them to `<skill>/docs/blueprint.md`: the nodes (Begin/End Profile Scope, Begin/End Profile Region,
+   Profile Bookmark), the rules (End on every path, no Scope across latent nodes, use a Region for work over several frames).
+4. **Tell them where to put nodes.** Use the trace (`trace_report.py blueprint --from S --to S` on a hitch) to name the
+   Blueprint and the function that is slow, then say between which calls to place Begin and End. Blueprint graphs are binary
+   assets: you cannot edit them as text. Insert nodes only if you have editor tools (for example an editor automation or
+   MCP plugin that can add nodes and connect pins). Otherwise give step-by-step instructions for the user to do it by hand.
+5. **Read the result.** The marks appear as `<prefix>/BP/<Name>`. `trace_report.py scopes` and `blueprint` list them.
+   Regions appear in the Regions track of Insights (they are not in the timers table).
+6. **Warn about the risks:** a forgotten End on one path breaks the timeline for that frame (the library closes it at the end
+   of the frame and logs a warning). Do not leave nodes around hot loops. Remove nodes you no longer need.
+
 ## Limits (tell the user when they apply)
 
-- Logic that exists only in Blueprint cannot be marked with C++ macros. Mark the C++ parts, or move hot code to C++.
+- Logic that exists only in Blueprint cannot be marked with C++ macros. Use the Blueprint nodes (Job D), mark the C++ parts,
+  or move hot code to C++.
 - Shipping builds remove all marks. You need a Development or Test build to get traces.
 - A trace from the editor also contains the cost of the editor's own UI.
 - The trace tail buffer adds a few seconds from before the start command.

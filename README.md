@@ -1,5 +1,13 @@
 # UE Insights Profiling Skill
 
+<p align="center">
+  <video src="https://github.com/olegsheyko/odius-UnrealProfilerSkill/raw/main/assets/ue-insights-profiling-promo.mp4" controls muted width="100%"></video>
+</p>
+
+<p align="center">
+  <a href="assets/ue-insights-profiling-promo.mp4">&#9654; Watch the trailer</a> (use this link if the player above does not load)
+</p>
+
 Find out what makes your Unreal Engine game slow, without learning the Unreal Insights window first.
 
 Tell your AI assistant "mark the Fermenter for profiling" or "look at my last trace and tell me what costs FPS".
@@ -40,7 +48,18 @@ This repository holds one skill: [`ue-insights-profiling/`](ue-insights-profilin
 - Compares two traces (before and after your change).
 - Works from the command line. You do not need to open the Unreal Insights window.
 
-**3. Find the code behind the numbers and suggest fixes**
+**3. See Blueprint, State Tree and Behavior Tree costs**
+- Shows which Blueprint functions, widgets, animation Blueprints and State Tree tasks are slow, without changing any Blueprint.
+- In the editor it works whenever the trace records the CPU. In other builds, tick **Stat Named Events** in the Trace menu (see [Record and open a trace](#record-and-open-a-trace)).
+- Works down to the function or event level. It cannot split a single event graph into nodes.
+
+**4. Mark parts inside Blueprint functions**
+- The project gets a small set of Blueprint nodes: **Begin/End Profile Scope**, **Begin/End Profile Region** and **Profile Bookmark**.
+- Blueprint authors (AI, State Tree, widgets) put them around any part of a graph, with no C++ needed.
+- The assistant tells you which Blueprint and which part to mark, using the trace. See
+  [`docs/blueprint.md`](ue-insights-profiling/docs/blueprint.md) for the rules.
+
+**5. Find the code behind the numbers and suggest fixes**
 - After the analysis, the assistant finds the source files and lines behind the biggest costs and the hitches.
 - It reads that code and suggests fixes **only for the problems the trace found**. Each suggestion has the number,
   the file and line, the reason, the fix, the estimated gain, the risk, and how to check it.
@@ -48,7 +67,7 @@ This repository holds one skill: [`ue-insights-profiling/`](ue-insights-profilin
 - If the assistant cannot see your project, it asks you to connect the project folder (or to paste the files).
 - After you apply a fix, record the same scenario again and it compares the two traces.
 
-**4. Help you record a trace**
+**6. Help you record a trace**
 - Gives you the right command and the steps for a clean recording.
 
 [Back to top](#ue-insights-profiling-skill)
@@ -116,7 +135,8 @@ Russian works too, for example "разметь Fermenter для профилир
 You can record a trace from the Unreal Editor without any command line.
 
 1. Open the **Trace** menu in the bottom toolbar of the editor.
-2. Under **Trace Destination**, choose **File** if you want a `.utrace` file on disk
+2. If you do not see Blueprint function names in your trace, tick **Stat Named Events** in the same menu and record again.
+   Under **Trace Destination**, choose **File** if you want a `.utrace` file on disk
    (for example in `Saved/Profiling`). **Trace Store** keeps the trace in Unreal's own trace storage.
 3. Click **Start Trace**. Play the mechanic for 20 to 30 seconds. Open the same menu again to stop the trace.
 4. To open the result, go to **Trace > Recent Traces** and click your trace. It opens in Unreal Insights.
@@ -214,6 +234,7 @@ python <skill>/scripts/trace_report.py hitches  --trace Saved/Profiling/my.utrac
 | `trace_report.py scopes` | What your own marks cost |
 | `trace_report.py hitches` | The slowest frames and their causes |
 | `trace_report.py compare` | Two traces side by side |
+| `trace_report.py blueprint` | Blueprint, State Tree and Behavior Tree costs |
 | `trace_report.py locate` | The project source files and lines behind the biggest costs |
 
 **Chat assistant without file access?** Open [`PROMPTS.md`](ue-insights-profiling/PROMPTS.md), paste a prompt, and attach
@@ -227,7 +248,7 @@ python <skill>/scripts/trace_report.py hitches  --trace Saved/Profiling/my.utrac
 
 - **Trace from the editor vs. a game build.** A trace from the editor also contains the cost of the editor window.
   For the most honest numbers, record with `-game` (see [`docs/capture.md`](ue-insights-profiling/docs/capture.md)).
-- **Blueprint.** Marks work in C++ only. Logic that exists only in Blueprint cannot be marked.
+- **Blueprint.** C++ marks work in C++ only. For Blueprint, the editor shows functions automatically (other builds need **Stat Named Events**), and use the Blueprint profiling nodes to mark parts inside a function.
 - **Shipping builds.** All marks are removed in Shipping builds, so they cost nothing there. Record traces with a Development build.
 - **Version control.** The assistant follows your project rules. With Perforce it runs `p4 edit` before changing a file.
   It never submits your changes.
@@ -244,7 +265,7 @@ python <skill>/scripts/trace_report.py hitches  --trace Saved/Profiling/my.utrac
 | [`ue-insights-profiling/SKILL.md`](ue-insights-profiling/SKILL.md) | The instructions for the assistant |
 | [`ue-insights-profiling/docs/`](ue-insights-profiling/docs/) | How to place marks, how to read results, how to record a trace |
 | [`ue-insights-profiling/scripts/`](ue-insights-profiling/scripts/) | The three Python tools |
-| [`ue-insights-profiling/templates/`](ue-insights-profiling/templates/) | A starter header for projects that have no profiling macros yet |
+| [`ue-insights-profiling/templates/`](ue-insights-profiling/templates/) | A starter header and the Blueprint node library for projects that have none yet |
 | [`ue-insights-profiling/PROMPTS.md`](ue-insights-profiling/PROMPTS.md) | Ready-made prompts for chat assistants |
 | [`assets/`](assets/) | Screenshots used in this README |
 

@@ -7,6 +7,7 @@
   python trace_report.py hitches  --trace X.utrace [--threshold 40 --top 10]
   python trace_report.py compare  --trace NEW.utrace --baseline OLD.utrace [--prefix MP/]
   python trace_report.py locate   --trace X.utrace [--timers NAME ...]   # which project files are behind the costs
+  python trace_report.py blueprint --trace X.utrace [--from S --to S]   # Blueprint / State Tree / Behavior Tree costs (needs Stat Named Events)
 
 Common: --out DIR (default <project>/Saved/Profiling/analysis), --insights EXE, --prefix PFX.
 Times in Insights CSVs are seconds; everything printed here is milliseconds.
@@ -271,6 +272,45 @@ def mode_compare(ins, a):
         print(f'  {d:+7.3f}  [{g}] {n[:80]}  ({mb.get((g,n),0):.3f} -> {mn.get((g,n),0):.3f})')
 
 
+BP_RX = re.compile(r'^(?:\w+/BP/|ExecuteUbergraph_|BlueprintUpdateAnimation|BlueprintThreadSafeUpdateAnimation|K2_|'
+                   r'(?:W?BP|ABP|STT|STC|STE|BTT|BTS|BTD|AM|GA|AC|ANS|AN)_\w+|\w+_C(?:$|[ \[])|\w+_C_\d+)')
+AI_RX = re.compile(r'StateTree|BehaviorTree|^BT[TSD]?_|^STT_|^STC_|^STE_|BTTask|BTService|BTDecorator')
+
+
+def bp_label(name):
+    """Shorten 'WBP_Foo_C /Engine/Transient.UnrealEdEngine_0:GameInstance_0.WBP_Foo_C_0' to 'WBP_Foo_C'."""
+    return name.split(' /')[0].split(' [')[0]
+
+
+def mode_blueprint(ins, a):
+    fr = load_frames(ins)
+    if a.t_from is None:
+        run = foreground_runs(fr)[0]
+        t0, t1 = run[0][0], run[-1][0] + run[-1][2] / 1000
+        print(f'auto window: longest foreground run {t0:.1f}s -> {t1:.1f}s')
+    else:
+        t0, t1 = a.t_from, a.t_to
+    ev = load_window(ins, t0, t1, f'{t0:.0f}_{t1:.0f}' if a.t_from is None else f'bp{t0:.3f}_{t1:.3f}')
+    frames = sum(1 for e in ev['GameThread'] if e[3] == TICK) or 1
+    ex = exclusive(ev)
+    agg = {}
+    for (g, n), v in ex.items():
+        if BP_RX.match(n) or AI_RX.search(n):
+            k = (g, bp_label(n))
+            x = agg.setdefault(k, [0.0, 0, 0.0, 0.0])
+            x[0] += v[0]; x[1] += v[1]; x[2] += v[2]; x[3] = max(x[3], v[3])
+    print(f'window {t0:.2f}-{t1:.2f}s | {frames} frames | Blueprint-like timers found: {len(agg)}')
+    if not agg:
+        print('No Blueprint timers in this window. Record the trace with "Stat Named Events" ON (Trace menu in the editor) and the')
+        print('cpu channel enabled; or this window had no Blueprint code running. See docs/capture.md.')
+        return
+    print('(times include nested calls, so a Blueprint widget also includes the C++ code it calls; "max" is the slowest single call)')
+    print(f'{"ms/frame":>9} {"calls/fr":>8} {"max ms":>8}  {"thread":<18} timer')
+    for (g, n), (excl_s, cnt, incl_s, mx) in sorted(agg.items(), key=lambda kv: -kv[1][2])[:a.top * 2]:
+        tag = '  <- State Tree / Behavior Tree' if AI_RX.search(n) else ''
+        print(f'{incl_s*1000/frames:9.3f} {cnt/frames:8.2f} {mx*1000:8.3f}  {g:<18} {n[:60]}{tag}')
+
+
 ENGINE_ONLY = ('WinPumpMessages', 'WaitForTasks', 'Slate::Prepass', 'Slate_PaintSlowPath', 'ProcessLocalPlayerSlateOperations',
                'FEngineLoop', 'RHI', 'D3D12', 'SceneRender', 'TemporalSuperResolution', 'Nanite', 'VirtualShadowMap', 'Shadow',
                'RenderGraph', 'FRDG', 'ZenHttp', 'CharacterMesh', 'UWorld_Tick', 'Tick_Engine', 'Frame', 'Present')
@@ -362,7 +402,7 @@ def mode_locate(ins, a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('mode', choices=['overview', 'scopes', 'cost', 'hitches', 'compare', 'locate'])
+    ap.add_argument('mode', choices=['overview', 'scopes', 'cost', 'hitches', 'compare', 'locate', 'blueprint'])
     ap.add_argument('--trace'); ap.add_argument('--baseline'); ap.add_argument('--out'); ap.add_argument('--insights')
     ap.add_argument('--project', default='.'); ap.add_argument('--prefix', default='')
     ap.add_argument('--from', dest='t_from', type=float); ap.add_argument('--to', dest='t_to', type=float)

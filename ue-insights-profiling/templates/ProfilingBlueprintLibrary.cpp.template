@@ -1,0 +1,190 @@
+#include "__PFX__ProfilingBlueprintLibrary.h"
+
+#include "Misc/CoreDelegates.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "ProfilingDebugging/MiscTrace.h"
+#include "Stats/Stats.h"
+
+DEFINE_LOG_CATEGORY_STATIC(Log__PFX__Profile, Log, All);
+
+// How the Begin/End scope pair stays correct
+// -------------------------------------------
+// Insights closes the most recent open event on every End (events are strictly nested, End has no name).
+// The engine wraps EVERY Blueprint function call in its own event: it opens one before our function runs and closes one
+// when it returns. That closing End would silently close OUR scope event instead.
+//
+//   Begin call:  engine opens W_b, we open S (+ a dummy D that the engine's closing End consumes). Left open: W_b, S.
+//   End call:    engine opens W_e, we close W_e, S (the engine's closing End then closes W_b).
+//
+// So every scope that was opened while the wrapper was active costs one extra event ("wrapped"). The decision is stored
+// per scope. With no wrapper the pair is a plain Begin/End.
+//
+// When is the wrapper active? It is the engine's FScopeCycleCounterUObject (UObjectBaseUtility.h):
+//  - in builds with STATS (the editor / Development builds with developer tools): whenever the CPU trace channel is on;
+//  - in builds without STATS but with named events: only while "Stat Named Events" is on and the CPU channel is on.
+namespace
+{
+	struct FOpenScope
+	{
+		int32 Id = 0;
+		FString Name;
+		bool bWrapped = false; // The engine wrapped the Begin call in its own event.
+	};
+
+	// Game thread only (Blueprint scopes are not supported on other threads).
+	TArray<FOpenScope> GOpenScopes;
+	int32 GNextScopeId = 1;
+	FDelegateHandle GEndFrameHandle;
+
+	FString MakeTraceName(const FName Name)
+	{
+		return FString::Printf(TEXT("__PREFIX__/BP/%s"), *Name.ToString());
+	}
+
+	bool IsEngineWrapperActive()
+	{
+#if CPUPROFILERTRACE_ENABLED
+		if (!UE_TRACE_CHANNELEXPR_IS_ENABLED(CpuChannel))
+		{
+			return false;
+		}
+	#if STATS
+		return true;
+	#elif ENABLE_STATNAMEDEVENTS_UOBJECT
+		return GCycleStatsShouldEmitNamedEvents > 0;
+	#else
+		return false;
+	#endif
+#else
+		return false;
+#endif
+	}
+
+	void EmitEnd(const int32 Count = 1)
+	{
+#if CPUPROFILERTRACE_ENABLED
+		for (int32 I = 0; I < Count; ++I)
+		{
+			FCpuProfilerTrace::OutputEndEvent();
+		}
+#endif
+	}
+
+	// Events to close for one scope: its own event, plus the engine's wrapper event if it was left open.
+	int32 EventsToClose(const FOpenScope& Scope)
+	{
+		return Scope.bWrapped ? 2 : 1;
+	}
+
+	// Safety net: a Begin without End leaves events open. Close what is left at the end of the frame and say which one.
+	void CloseLeakedScopes()
+	{
+		if (GOpenScopes.IsEmpty())
+		{
+			return;
+		}
+		for (int32 I = GOpenScopes.Num() - 1; I >= 0; --I)
+		{
+			UE_LOG(Log__PFX__Profile, Warning,
+				TEXT("Profile Scope '%s' was never ended (missing End Profile Scope on some execution path). Closed at end of frame."),
+				*GOpenScopes[I].Name);
+			EmitEnd(EventsToClose(GOpenScopes[I]));
+		}
+		GOpenScopes.Reset();
+	}
+
+	void EnsureEndFrameHook()
+	{
+		if (!GEndFrameHandle.IsValid())
+		{
+			GEndFrameHandle = FCoreDelegates::OnEndFrame.AddStatic(&CloseLeakedScopes);
+		}
+	}
+}
+
+F__PFX__ProfileScopeHandle U__PFX__ProfilingBlueprintLibrary::BeginProfileScope(const FName Name)
+{
+	F__PFX__ProfileScopeHandle Handle;
+#if CPUPROFILERTRACE_ENABLED
+	// Only record while the CPU channel is on, so the Begin/End events always stay balanced.
+	if (!IsInGameThread() || !UE_TRACE_CHANNELEXPR_IS_ENABLED(CpuChannel))
+	{
+		return Handle;
+	}
+	EnsureEndFrameHook();
+
+	FOpenScope& Scope = GOpenScopes.AddDefaulted_GetRef();
+	Scope.Id = GNextScopeId++;
+	if (GNextScopeId <= 0)
+	{
+		GNextScopeId = 1;
+	}
+	Scope.Name = Name.ToString();
+	Scope.bWrapped = IsEngineWrapperActive();
+
+	FCpuProfilerTrace::OutputBeginDynamicEvent(*MakeTraceName(Name));
+	if (Scope.bWrapped)
+	{
+		// The engine's closing End (when this call returns) must not close our scope: give it a dummy event to close.
+		FCpuProfilerTrace::OutputBeginDynamicEvent(TEXT("__PREFIX__/BP/(scope begin)"));
+	}
+	Handle.Id = Scope.Id;
+#endif
+	return Handle;
+}
+
+void U__PFX__ProfilingBlueprintLibrary::EndProfileScope(const F__PFX__ProfileScopeHandle& Handle)
+{
+#if CPUPROFILERTRACE_ENABLED
+	if (Handle.Id == 0 || !IsInGameThread())
+	{
+		return;
+	}
+	const int32 Index = GOpenScopes.IndexOfByPredicate([&Handle](const FOpenScope& S) { return S.Id == Handle.Id; });
+	if (Index == INDEX_NONE)
+	{
+		return; // Already closed by the end-of-frame safety net.
+	}
+
+	// Scopes opened after this one and not ended are closed first, so the trace stays properly nested.
+	for (int32 I = GOpenScopes.Num() - 1; I > Index; --I)
+	{
+		UE_LOG(Log__PFX__Profile, Warning,
+			TEXT("Profile Scope '%s' was not ended before '%s' ended. Closed together."),
+			*GOpenScopes[I].Name, *GOpenScopes[Index].Name);
+		EmitEnd(EventsToClose(GOpenScopes[I]));
+	}
+
+	// The engine opened an event for THIS call (if the wrapper is active). It sits on top of our scope: close it with
+	// our own End, then the scope. The engine's closing End (on return) then closes the Begin call's wrapper event.
+	EmitEnd(1 + (GOpenScopes[Index].bWrapped ? 1 : 0));
+	GOpenScopes.SetNum(Index);
+#endif
+}
+
+F__PFX__ProfileRegionHandle U__PFX__ProfilingBlueprintLibrary::BeginProfileRegion(const FName Name)
+{
+	F__PFX__ProfileRegionHandle Handle;
+#if MISCTRACE_ENABLED
+	if (FMiscTrace::ShouldTraceRegion())
+	{
+		Handle.Id = static_cast<int64>(FMiscTrace::OutputBeginRegionWithId(*MakeTraceName(Name)));
+	}
+#endif
+	return Handle;
+}
+
+void U__PFX__ProfilingBlueprintLibrary::EndProfileRegion(const F__PFX__ProfileRegionHandle& Handle)
+{
+#if MISCTRACE_ENABLED
+	if (Handle.Id != 0)
+	{
+		FMiscTrace::OutputEndRegionWithId(static_cast<uint64>(Handle.Id));
+	}
+#endif
+}
+
+void U__PFX__ProfilingBlueprintLibrary::ProfileBookmark(const FString& Text)
+{
+	TRACE_BOOKMARK(TEXT("__PREFIX__/BP %s"), *Text);
+}

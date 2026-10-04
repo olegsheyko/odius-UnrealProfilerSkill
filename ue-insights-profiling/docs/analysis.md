@@ -37,6 +37,7 @@
 | `scopes` | "What do our mechanics cost?" | For each scope: total, ms per frame, calls, average, max over the whole trace |
 | `hitches` | Stutters | For each hitch: the main timer, a label for the cause, your share |
 | `compare` | Before and after a change | The biggest changes in ms per frame, by timer |
+| `blueprint` | "Which Blueprint is slow?" | Blueprint, State Tree and Behavior Tree timers: ms per frame, calls per frame, slowest single call. Use `--from S --to S` to look inside one hitch. In builds without developer tools it needs "Stat Named Events" (see `capture.md`). |
 | `locate` | After the analysis, to find the code | Maps the biggest costs and hitch causes to project source files and lines. If the project is not connected it prints `PROJECT_NOT_CONNECTED`. |
 
 ## How to draw conclusions
@@ -69,6 +70,30 @@
 | `ZenHttp_CurlPerform` | Zen/DDC network, usually in the background. |
 | `UAssetRegistryImpl::GetAssets` | Asset query. In game code this is suspicious. |
 | `FileSystemCacheStoreMaintainer`, `FBaseShaderFormat_*`, `ShaderJobTask` | Cache upkeep and shaders, in the background. |
+
+## What the trace shows for Blueprint, State Tree and Behavior Tree
+
+Not everything is visible. This is what to expect (checked in the UE 5.7 source and in a real trace):
+
+| Code | Visible? | How it looks |
+|---|---|---|
+| Blueprint functions and events | Yes (in the editor whenever `cpu` is on; elsewhere with "Stat Named Events") | Function names, the object or class (`BP_Cauldron_C`, `WBP_HUD_C`) and `ExecuteUbergraph_<Blueprint>` for the event graph |
+| Native (C++) functions called from Blueprint | Yes | As a named event inside the Blueprint call |
+| Animation Blueprints | Yes | `ABP_*_C`, `Goblin_Anim_C`, `BlueprintUpdateAnimation`, often on worker threads |
+| State Tree tasks, evaluators and conditions written in Blueprint | Yes | `STT_<Name>_C`, `ExecuteUbergraph_STT_<Name>`, and the `StateTreeAI` component tick |
+| State Tree tasks written in C++ | No, not automatically | Add your own mark inside `EnterState`, `Tick` and `ExitState` |
+| Behavior Tree nodes written in Blueprint | Yes (same as other Blueprints) | Blueprint function names |
+| Behavior Tree nodes written in C++ | No, not automatically | Add your own marks |
+| The engine's own State Tree and Behavior Tree totals (`StateTree_Task_Tick`, `STAT_AI_BehaviorTree_Tick`) | Not seen in this project's trace | They are stat counters, not trace events |
+| Single nodes, branches and loops inside one Blueprint graph | No | The whole event graph is one block (`ExecuteUbergraph_*`) |
+
+So the answer to "are ALL Blueprints visible?" is: every Blueprint function that actually runs shows up, but only down to
+the function or event level, and only while the `cpu` channel is on (plus "Stat Named Events" in builds without developer tools).
+
+How to read it: times are inclusive. A Blueprint calls other Blueprints and C++ code, so the parent shows the sum.
+Follow the chain down until the time stops moving to a child. Example from this project (a 20 ms hitch):
+`StateTreeAI` 20.4 ms, then `ExecuteUbergraph_STT_SetGuestState` 20.1 ms, then `ExecuteUbergraph_BPC_GuestOrder` 20.0 ms.
+The slow code is inside `BPC_GuestOrder`.
 
 ## PIE versus Standalone
 

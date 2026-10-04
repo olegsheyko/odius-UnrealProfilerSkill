@@ -27,6 +27,22 @@ Trace.SnapshotFile                        (save the last few seconds from memory
 ```
 The Trace button in the bottom right corner of the editor does the same thing.
 
+## Blueprint, State Tree and Behavior Tree in the trace
+
+Blueprint functions and events show in the trace without changing any Blueprint. What you need depends on the build
+(checked in the UE 5.7 source: `Build.h`, `UObjectBaseUtility.h`, and in real traces of this project):
+- **Editor and Development builds with developer tools (this project's editor):** Blueprint functions are traced whenever the
+  `cpu` channel is on. You do not need any extra option.
+- **Builds without developer tools (for example a packaged Test build):** turn on **Stat Named Events**: the **Trace** menu
+  checkbox in the editor, or the console command `stats.NamedEvents 1` (checked in the source), before you record.
+
+If you do not see Blueprint names in your trace, turn on Stat Named Events and record again.
+
+Costs and limits:
+- Named events slow the game down a little. Use them to find the expensive Blueprint, not for final numbers.
+- Without these events, Blueprint time appears only as one anonymous block, or not at all.
+- Use a Development build.
+
 ## The tail buffer
 
 The trace system keeps the latest events in memory. When you run `Trace.File` or `Trace.Start`, it writes this

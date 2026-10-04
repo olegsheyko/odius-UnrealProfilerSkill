@@ -1,0 +1,66 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Kismet/BlueprintFunctionLibrary.h"
+#include "__PFX__ProfilingBlueprintLibrary.generated.h"
+
+// Blueprint nodes for Unreal Insights. They let Blueprint authors mark a part INSIDE a Blueprint function.
+// Names are written to the trace as "__PREFIX__/BP/<Name>", so the Timers filter "__PREFIX__/" finds them next to the C++ marks.
+//
+// Two kinds of marks:
+//  - Profile Scope (Begin/End): a real timer. Must start and end in the SAME frame, and End must be reached on
+//    every execution path. Do not use it across Delay/latent nodes.
+//  - Profile Region (Begin/End): for work that spans several frames (latent State Tree tasks, Delay...).
+// All nodes are DevelopmentOnly: they are removed from Shipping builds.
+
+/** Returned by Begin Profile Scope. Pass it to End Profile Scope. Id 0 means "not recording". */
+USTRUCT(BlueprintType)
+struct __MODULE_API__ F__PFX__ProfileScopeHandle
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	int32 Id = 0;
+};
+
+/** Returned by Begin Profile Region. Pass it to End Profile Region. Id 0 means "not recording". */
+USTRUCT(BlueprintType)
+struct __MODULE_API__ F__PFX__ProfileRegionHandle
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	int64 Id = 0;
+};
+
+UCLASS()
+class __MODULE_API__ U__PFX__ProfilingBlueprintLibrary : public UBlueprintFunctionLibrary
+{
+	GENERATED_BODY()
+
+public:
+	/** Start a timed scope. Call End Profile Scope with the returned handle on EVERY path out of the marked part. */
+	UFUNCTION(BlueprintCallable, Category = "Profiling", meta = (DevelopmentOnly, DisplayName = "Begin Profile Scope",
+		Keywords = "profile profiling trace insights timer scope begin start measure"))
+	static F__PFX__ProfileScopeHandle BeginProfileScope(FName Name);
+
+	/** End the scope started by Begin Profile Scope. */
+	UFUNCTION(BlueprintCallable, Category = "Profiling", meta = (DevelopmentOnly, DisplayName = "End Profile Scope",
+		Keywords = "profile profiling trace insights timer scope end stop measure"))
+	static void EndProfileScope(const F__PFX__ProfileScopeHandle& Handle);
+
+	/** Start a named region. Use it for work that lasts several frames. */
+	UFUNCTION(BlueprintCallable, Category = "Profiling", meta = (DevelopmentOnly, DisplayName = "Begin Profile Region",
+		Keywords = "profile profiling trace insights region begin start measure"))
+	static F__PFX__ProfileRegionHandle BeginProfileRegion(FName Name);
+
+	/** End the region started by Begin Profile Region. */
+	UFUNCTION(BlueprintCallable, Category = "Profiling", meta = (DevelopmentOnly, DisplayName = "End Profile Region",
+		Keywords = "profile profiling trace insights region end stop measure"))
+	static void EndProfileRegion(const F__PFX__ProfileRegionHandle& Handle);
+
+	/** Put a vertical marker with a text on the Insights timeline (for one-time events). */
+	UFUNCTION(BlueprintCallable, Category = "Profiling", meta = (DevelopmentOnly, DisplayName = "Profile Bookmark",
+		Keywords = "profile profiling trace insights bookmark marker event"))
+	static void ProfileBookmark(const FString& Text);
+};

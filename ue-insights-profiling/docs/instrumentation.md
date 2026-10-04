@@ -111,11 +111,12 @@ Format: `// [Profiling] <what the scope isolates / why / how often>`.
 
 ## Blueprint
 
-C++ macros do not work in Blueprint. If a mechanic lives in Blueprint:
+C++ macros do not work inside Blueprint graphs. If a mechanic lives in Blueprint:
 1. Mark the C++ base classes and the places where C++ calls the Blueprint.
-2. Tell the developer that the Blueprint part only shows up as a total in the trace.
-3. Suggest moving the hot code to C++. Only if asked, add a `BlueprintCallable` `BeginScope/EndScope` wrapper
-   (it is not reliable if the function exits early).
+2. Blueprint functions and events already show in the trace (in the editor whenever `cpu` is on; elsewhere with "Stat Named Events") (see `capture.md` and `analysis.md`).
+3. To measure a part INSIDE a Blueprint function, use the Blueprint profiling nodes (Begin/End Profile Scope, Begin/End Profile
+   Region, Profile Bookmark). See `blueprint.md` and Job D in `SKILL.md`.
+4. For very hot Blueprint logic, consider moving it to C++.
 
 ## Check your work
 
